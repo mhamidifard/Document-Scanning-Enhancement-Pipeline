@@ -1,0 +1,23 @@
+[project]
+name = "my-cv-project"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { name = "Mohammad sajjad", email = "mohammadsajjad.hamidifard@email.kntu.ac.ir" }
+]
+requires-python = ">=3.14"
+dependencies = [
+    "matplotlib>=3.11.1",
+    "opencv-python>=5.0.0.93",
+    "pycocotools>=2.0.11",
+    "torch>=2.13.0",
+    "torchvision>=0.28.0",
+]
+
+[project.scripts]
+my-cv-project = "my_cv_project:main"
+
+[build-system]
+requires = ["uv_build>=0.12.1,<0.13.0"]
+build-backend = "uv_build"
