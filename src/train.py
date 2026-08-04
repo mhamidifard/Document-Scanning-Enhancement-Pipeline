@@ -10,7 +10,7 @@ from torch.utils.data import DataLoader
 import matplotlib.pyplot as plt
 import argparse
 
-# Dynamically setup sys.path so we can run from anywhere
+# Dynamically setup sys.path
 script_dir = os.path.dirname(os.path.abspath(__file__))
 base_dir = os.path.dirname(script_dir)
 if base_dir not in sys.path:
@@ -18,6 +18,7 @@ if base_dir not in sys.path:
 
 from src.dataset import DocumentDataset
 from src.model import EnhancementUNet
+from src.pipeline import GPUDegradationPipeline
 
 # ==========================================
 # 1. Custom Loss Functions
@@ -130,8 +131,8 @@ def main():
     os.makedirs(ckpt_dir, exist_ok=True)
     
     # Dataset Preparation (Fixed Seed for Deterministic Splits)
-    clean_paths = sorted(glob.glob(os.path.join(base_dir, "data", "clean_scans", "*.jpg")))
-    bg_paths = sorted(glob.glob(os.path.join(base_dir, "data", "backgrounds", "*.jpg")))
+    clean_paths = sorted(glob.glob(os.path.join(base_dir, "data", "clean_scans", "*.*")))
+    bg_paths = sorted(glob.glob(os.path.join(base_dir, "data", "backgrounds", "*.*")))
     
     if not clean_paths or not bg_paths:
         print("WARNING: Data directories are empty. Please ensure data is loaded for training.")
@@ -145,20 +146,21 @@ def main():
     
     train_scans = clean_paths[:train_split]
     val_scans = clean_paths[train_split:val_split]
-    # test_scans = clean_paths[val_split:] # Saved for evaluation phase
     
     print(f"Dataset split: {len(train_scans)} train, {len(val_scans)} val")
     
-    train_dataset = DocumentDataset(train_scans, bg_paths, split='train', task='enhancement')
-    val_dataset = DocumentDataset(val_scans, bg_paths, split='val', task='enhancement')
+    # Dataset only loads raw clean/bg images and applies CPU JPEG compression
+    train_dataset = DocumentDataset(train_scans, bg_paths, split='train')
+    val_dataset = DocumentDataset(val_scans, bg_paths, split='val')
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
 
-    # Model, Loss, Optimizer Setup
+    # Model, GPU Pipeline, Loss, Optimizer Setup
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on device: {device}")
     
+    gpu_pipeline = GPUDegradationPipeline().to(device)
     model = EnhancementUNet().to(device)
     criterion = EnhancementLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
@@ -188,8 +190,13 @@ def main():
         model.train()
         running_train_loss = 0.0
         
-        for batch_idx, (inputs, targets) in enumerate(train_loader):
-            inputs, targets = inputs.to(device), targets.to(device)
+        for batch_idx, (clean_batch, bg_batch) in enumerate(train_loader):
+            # Move raw tensors to GPU
+            clean_batch, bg_batch = clean_batch.to(device), bg_batch.to(device)
+            
+            # Run the augmentation pipeline fully on the GPU!
+            with torch.no_grad():
+                inputs, targets = gpu_pipeline(clean_batch, bg_batch, task='enhancement')
             
             optimizer.zero_grad()
             outputs = model(inputs)
@@ -200,7 +207,7 @@ def main():
             
             running_train_loss += loss.item()
             
-            if batch_idx % 1 == 0:
+            if batch_idx % 10 == 0:
                 print(f"Epoch [{epoch+1}/{args.epochs}], Batch [{batch_idx}/{len(train_loader)}], Loss: {loss.item():.4f}")
                 
         epoch_train_loss = running_train_loss / len(train_loader)
@@ -210,9 +217,12 @@ def main():
         model.eval()
         running_val_loss = 0.0
         with torch.no_grad():
-            for inputs, targets in val_loader:
-                inputs, targets = inputs.to(device), targets.to(device)
+            for clean_batch, bg_batch in val_loader:
+                clean_batch, bg_batch = clean_batch.to(device), bg_batch.to(device)
+                
+                inputs, targets = gpu_pipeline(clean_batch, bg_batch, task='enhancement')
                 outputs = model(inputs)
+                
                 loss = criterion(outputs, targets)
                 running_val_loss += loss.item()
                 

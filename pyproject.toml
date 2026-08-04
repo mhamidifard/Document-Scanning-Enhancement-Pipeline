@@ -8,6 +8,7 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "kornia>=0.8.3",
     "matplotlib>=3.11.1",
     "opencv-python>=5.0.0.93",
     "pycocotools>=2.0.11",
