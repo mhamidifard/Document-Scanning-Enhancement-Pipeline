@@ -3,7 +3,7 @@ import torch.nn as nn
 import kornia
 
 class GPUDegradationPipeline(nn.Module):
-    def __init__(self, target_size=256, max_perturb=0.20, margin=0.15):
+    def __init__(self, target_size=1024, max_perturb=0.20, margin=0.15):
         super().__init__()
         self.target_size = target_size
         self.max_perturb = max_perturb

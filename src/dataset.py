@@ -16,7 +16,7 @@ def apply_jpeg_compression(img, quality_range=(30, 90), rng=None):
     return decimg
 
 class DocumentDataset(Dataset):
-    def __init__(self, clean_scans: List[str], backgrounds: List[str], split: str = 'train', target_size: int = 256):
+    def __init__(self, clean_scans: List[str], backgrounds: List[str], split: str = 'train', target_size: int = 1024):
         self.clean_scans = clean_scans
         self.backgrounds = backgrounds
         self.split = split
