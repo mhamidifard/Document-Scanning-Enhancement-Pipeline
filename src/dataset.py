@@ -182,14 +182,17 @@ class DegradationPipeline:
         return img, corners
 
 class DocumentDataset(Dataset):
-    def __init__(self, clean_scans: List[str], backgrounds: List[str], split: str = 'train', target_size: int = 256):
+    def __init__(self, clean_scans: List[str], backgrounds: List[str], split: str = 'train', target_size: int = 256, task: str = 'corner'):
         self.clean_scans = clean_scans
         self.backgrounds = backgrounds
         self.split = split
         self.target_size = target_size
+        self.task = task
         
         if len(self.clean_scans) == 0 or len(self.backgrounds) == 0:
             raise ValueError("Scan and background lists cannot be empty.")
+        if self.task not in ['corner', 'enhancement']:
+            raise ValueError("task must be 'corner' or 'enhancement'")
 
     def __len__(self):
         # Arbitrary epoch size; typically multiple of clean scans
@@ -220,24 +223,41 @@ class DocumentDataset(Dataset):
         # ------------------ Preprocessing ------------------
         orig_h, orig_w = degraded_img.shape[:2]
         
-        # Resize images to target size
-        degraded_img = cv2.resize(degraded_img, (self.target_size, self.target_size))
-        clean_img_target = cv2.resize(clean_img, (self.target_size, self.target_size))
-        
-        # Scale corner coordinates
-        scale_x = self.target_size / orig_w
-        scale_y = self.target_size / orig_h
-        corners[:, 0] *= scale_x
-        corners[:, 1] *= scale_y
-        
-        # Normalize corners to [0, 1]
-        corners[:, 0] /= self.target_size
-        corners[:, 1] /= self.target_size
-        
-        # Convert images to tensors and normalize to [0, 1]
-        # HWC -> CHW
-        degraded_tensor = torch.from_numpy(degraded_img.transpose((2, 0, 1))).float() / 255.0
-        clean_tensor = torch.from_numpy(clean_img_target.transpose((2, 0, 1))).float() / 255.0
-        corners_tensor = torch.from_numpy(corners).float()
-        
-        return degraded_tensor, clean_tensor, corners_tensor
+        if self.task == 'corner':
+            # Resize image to target size
+            degraded_img = cv2.resize(degraded_img, (self.target_size, self.target_size))
+            
+            # Scale corner coordinates
+            scale_x = self.target_size / orig_w
+            scale_y = self.target_size / orig_h
+            corners[:, 0] *= scale_x
+            corners[:, 1] *= scale_y
+            
+            # Normalize corners to [0, 1]
+            corners[:, 0] /= self.target_size
+            corners[:, 1] /= self.target_size
+            
+            degraded_tensor = torch.from_numpy(degraded_img.transpose((2, 0, 1))).float() / 255.0
+            corners_tensor = torch.from_numpy(corners).float()
+            
+            return degraded_tensor, corners_tensor
+            
+        elif self.task == 'enhancement':
+            # Rectify the degraded image using the known true corners
+            target_corners = np.array([
+                [0, 0],
+                [self.target_size - 1, 0],
+                [self.target_size - 1, self.target_size - 1],
+                [0, self.target_size - 1]
+            ], dtype=np.float32)
+            
+            H_rectify = cv2.getPerspectiveTransform(corners, target_corners)
+            rectified_degraded_img = cv2.warpPerspective(degraded_img, H_rectify, (self.target_size, self.target_size))
+            
+            # Resize clean image to target size
+            clean_img_target = cv2.resize(clean_img, (self.target_size, self.target_size))
+            
+            degraded_tensor = torch.from_numpy(rectified_degraded_img.transpose((2, 0, 1))).float() / 255.0
+            clean_tensor = torch.from_numpy(clean_img_target.transpose((2, 0, 1))).float() / 255.0
+            
+            return degraded_tensor, clean_tensor
