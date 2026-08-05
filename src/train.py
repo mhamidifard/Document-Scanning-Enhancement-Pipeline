@@ -89,7 +89,7 @@ class SobelLoss(nn.Module):
         return F.l1_loss(pred_x, target_x) + F.l1_loss(pred_y, target_y)
 
 class EnhancementLoss(nn.Module):
-    def __init__(self, w_l1=0.4, w_ssim=0.3, w_sobel=0.3):
+    def __init__(self, w_l1=0.2, w_ssim=0.4, w_sobel=0.4):
         super().__init__()
         self.w_l1 = w_l1
         self.w_ssim = w_ssim
