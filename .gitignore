@@ -17,3 +17,6 @@ checkpoints/*.pth
 checkpoints/*.png
 results1/
 checkpoints1/
+results4/*
+results/enhancement_output/*
+checkpoints4/*

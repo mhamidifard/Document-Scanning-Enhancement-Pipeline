@@ -2,15 +2,15 @@ import torch
 import torch.nn as nn
 
 class DoubleConv(nn.Module):
-    """(convolution => ReLU) * 2"""
+    """(convolution => [InstanceNorm] => ReLU) * 2"""
     def __init__(self, in_channels, out_channels):
         super().__init__()
         self.double_conv = nn.Sequential(
-            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm2d(out_channels, affine=True),
             nn.ReLU(inplace=True),
-            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.BatchNorm2d(out_channels),
+            nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.InstanceNorm2d(out_channels, affine=True),
             nn.ReLU(inplace=True)
         )
 
@@ -18,8 +18,8 @@ class DoubleConv(nn.Module):
         return self.double_conv(x)
 
 
-class EnhancementUNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3):
+class UNet(nn.Module):
+    def __init__(self, in_channels=3, out_channels=3, use_sigmoid=True):
         super().__init__()
         
         # Encoder (Downsampling)
@@ -50,10 +50,13 @@ class EnhancementUNet(nn.Module):
         self.conv_up4 = DoubleConv(128, 64)
         
         # Final Output Layer
-        self.outc = nn.Sequential(
-            nn.Conv2d(64, out_channels, kernel_size=1),
-            nn.Sigmoid()  # Bounds output exactly between [0, 1] as requested
-        )
+        if use_sigmoid:
+            self.outc = nn.Sequential(
+                nn.Conv2d(64, out_channels, kernel_size=1),
+                nn.Sigmoid()  # Bounds output exactly between [0, 1] for image tasks
+            )
+        else:
+            self.outc = nn.Conv2d(64, out_channels, kernel_size=1) # Raw logits for heatmaps
 
     def forward(self, x):
         # Encoder
@@ -94,13 +97,59 @@ class EnhancementUNet(nn.Module):
         out = self.outc(x)
         return out
 
+# Aliases for clarity in other scripts
+EnhancementUNet = UNet
+
+class CornerHeatmapNet(UNet):
+    def __init__(self, in_channels=3, out_channels=4):
+        # Heatmaps suffer from vanishing gradients with MSE if a Sigmoid is used.
+        # We output raw logits and supervise directly with the Gaussian heatmaps.
+        super().__init__(in_channels=in_channels, out_channels=out_channels, use_sigmoid=False)
+
+class CornerRegressionNet(nn.Module):
+    def __init__(self, in_channels=3):
+        super().__init__()
+        
+        # Encoder (Downsampling to 1/32 of 256x256 = 8x8)
+        self.encoder = nn.Sequential(
+            DoubleConv(in_channels, 64),
+            nn.MaxPool2d(2), # 128
+            DoubleConv(64, 128),
+            nn.MaxPool2d(2), # 64
+            DoubleConv(128, 256),
+            nn.MaxPool2d(2), # 32
+            DoubleConv(256, 512),
+            nn.MaxPool2d(2), # 16
+            DoubleConv(512, 512),
+            nn.MaxPool2d(2)  # 8
+        )
+        
+        # Fully Connected Layers
+        # Assuming input size of 256x256, the final feature map is 8x8
+        self.fc = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(512 * 8 * 8, 1024),
+            nn.ReLU(inplace=True),
+            nn.Linear(1024, 256),
+            nn.ReLU(inplace=True),
+            nn.Linear(256, 8),
+            nn.Sigmoid() # Coordinates are normalized [0, 1]
+        )
+
+    def forward(self, x):
+        x = self.encoder(x)
+        out = self.fc(x)
+        return out
+
 if __name__ == "__main__":
     # Quick verification block
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Using device: {device}")
     
-    # Create model
-    model = EnhancementUNet(in_channels=3, out_channels=3).to(device)
+    # Create models
+    enhancement_model = EnhancementUNet(in_channels=3, out_channels=3).to(device)
+    heatmap_model = CornerHeatmapNet(in_channels=3, out_channels=4).to(device)
+    regression_model = CornerRegressionNet(in_channels=3).to(device)
     
     # Create dummy input tensor (Batch, Channels, Height, Width)
     dummy_input = torch.randn(1, 3, 256, 256).to(device)

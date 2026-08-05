@@ -66,18 +66,47 @@ class GPUDegradationPipeline(nn.Module):
         
         degraded = warped_clean * mask + bg_batch * (1 - mask)
         
-        # 4. Shadow Generation (Vectorized)
+        # 4. Shadow Generation (Vectorized & Diverse)
         shadows = torch.ones_like(degraded)
-        if torch.rand(1).item() > 0.5:
-            # Random horizontal shadow cutoff (lighter)
-            intensity = torch.empty(B, 1, 1, 1, device=device).uniform_(0.6, 0.95)
+        rand_val = torch.rand(1).item()
+        
+        if rand_val < 0.33:
+            # 1. Harsh horizontal/diagonal cutoff (like a desk edge or paper curl)
+            intensity = torch.empty(B, 1, 1, 1, device=device).uniform_(0.2, 0.7)
             start_idx = torch.randint(0, W // 2, (B,), device=device)
             for b in range(B):
                 shadows[b, :, :, start_idx[b]:] *= intensity[b].item()
-        else:
-            # Soft linear gradient (lighter)
-            gradient = torch.linspace(1.0, 0.6, W, device=device).unsqueeze(0).unsqueeze(0).expand(B, 3, H, W)
+                
+        elif rand_val < 0.66:
+            # 2. Soft linear gradient (general uneven lighting)
+            gradient = torch.linspace(1.0, torch.empty(1).uniform_(0.3, 0.7).item(), W, device=device)
+            gradient = gradient.unsqueeze(0).unsqueeze(0).expand(B, 3, H, W)
             shadows *= gradient
+            
+        else:
+            # 3. Radial/Blob shadow (simulating a hand or phone casting a shadow)
+            # Create a 2D meshgrid
+            y = torch.linspace(-1, 1, H, device=device)
+            x = torch.linspace(-1, 1, W, device=device)
+            yy, xx = torch.meshgrid(y, x, indexing='ij')
+            
+            for b in range(B):
+                # Random center for the shadow blob
+                cx = torch.empty(1, device=device).uniform_(-0.8, 0.8).item()
+                cy = torch.empty(1, device=device).uniform_(-0.8, 0.8).item()
+                
+                # Distance from center
+                dist = torch.sqrt((xx - cx)**2 + (yy - cy)**2)
+                
+                # Random radius and intensity
+                radius = torch.empty(1, device=device).uniform_(0.5, 1.5).item()
+                intensity = torch.empty(1, device=device).uniform_(0.2, 0.6).item()
+                
+                # Create soft circular mask
+                blob = torch.clamp((dist / radius), 0, 1)
+                # Map distance: 0 (center) -> intensity, 1 (edge) -> 1.0
+                blob = intensity + (1.0 - intensity) * blob
+                shadows[b] *= blob.unsqueeze(0)
         
         degraded = degraded * shadows
         
@@ -85,12 +114,48 @@ class GPUDegradationPipeline(nn.Module):
         degraded = self.color_jitter(degraded)
         degraded = self.blur(degraded)
         
-        # 6. Noise - Toned down
-        noise = torch.randn_like(degraded) * 0.01
+        # 6. Noise (Simulate variable ISO camera noise)
+        # Random noise intensity between 0.01 (clean) and 0.08 (very grainy)
+        noise_level = torch.empty(B, 1, 1, 1, device=device).uniform_(0.01, 0.08)
+        noise = torch.randn_like(degraded) * noise_level
         degraded = torch.clamp(degraded + noise, 0.0, 1.0)
         
         if task == 'corner':
-            return degraded, corners_normalized
+            import torch.nn.functional as F
+            deg_down = F.interpolate(degraded, size=(self.target_size, self.target_size), mode='bilinear', align_corners=False)
+            # Used for evaluation/visualization, returns normalized coordinates
+            return deg_down, corners_normalized
+            
+        elif task == 'regression':
+            import torch.nn.functional as F
+            deg_down = F.interpolate(degraded, size=(self.target_size, self.target_size), mode='bilinear', align_corners=False)
+            # Flatten to shape (B, 8) for the regression network target
+            return deg_down, corners_normalized.view(B, 8)
+            
+        elif task == 'heatmap':
+            # Generate 4 Gaussian heatmaps (one for each corner)
+            heatmaps = torch.zeros((B, 4, self.target_size, self.target_size), device=device)
+            y = torch.linspace(0, self.target_size - 1, self.target_size, device=device)
+            x = torch.linspace(0, self.target_size - 1, self.target_size, device=device)
+            yy, xx = torch.meshgrid(y, x, indexing='ij')
+            
+            sigma = 0.05 * self.target_size # Standard deviation of Gaussian blob
+            
+            for b in range(B):
+                for i in range(4):
+                    # Scale normalized coordinates to target_size (e.g. 256)
+                    cx = corners_normalized[b, i, 0] * self.target_size
+                    cy = corners_normalized[b, i, 1] * self.target_size
+                    
+                    dist_sq = (xx - cx)**2 + (yy - cy)**2
+                    heatmaps[b, i] = torch.exp(-dist_sq / (2 * sigma**2))
+                    
+            # We don't need reverse homography for corner detection targets!
+            # Resize degraded image down to target_size to feed model
+            import torch.nn.functional as F
+            deg_down = F.interpolate(degraded, size=(self.target_size, self.target_size), mode='bilinear', align_corners=False)
+            
+            return deg_down, heatmaps
             
         elif task == 'enhancement':
             # Rectify degraded image back to flat rectangle using inverse homography
@@ -105,4 +170,4 @@ class GPUDegradationPipeline(nn.Module):
             return rect_down, clean_down
         
         else:
-            raise ValueError("Task must be 'corner' or 'enhancement'")
+            raise ValueError("Task must be 'corner', 'regression', 'heatmap', or 'enhancement'")
