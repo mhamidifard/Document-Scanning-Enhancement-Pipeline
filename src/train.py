@@ -89,7 +89,7 @@ class SobelLoss(nn.Module):
         return F.l1_loss(pred_x, target_x) + F.l1_loss(pred_y, target_y)
 
 class EnhancementLoss(nn.Module):
-    def __init__(self, w_l1=0.1, w_ssim=0.5, w_sobel=0.4):
+    def __init__(self, w_l1=0.4, w_ssim=0.3, w_sobel=0.3):
         super().__init__()
         self.w_l1 = w_l1
         self.w_ssim = w_ssim
@@ -121,10 +121,11 @@ def plot_losses(train_losses, val_losses, output_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--epochs', type=int, default=50)
-    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--batch_size', type=int, default=4)
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--num_workers', type=int, default=0)
-    parser.add_argument('--img_size', type=int, default=1024)
+    parser.add_argument('--img_size', type=int, default=768)
+    parser.add_argument('--canvas_size', type=int, default=1536)
     args = parser.parse_args()
 
     # Create directories
@@ -150,9 +151,9 @@ def main():
     
     print(f"Dataset split: {len(train_scans)} train, {len(val_scans)} val")
     
-    # Dataset only loads raw clean/bg images and applies CPU JPEG compression
-    train_dataset = DocumentDataset(train_scans, bg_paths, split='train', target_size=args.img_size)
-    val_dataset = DocumentDataset(val_scans, bg_paths, split='val', target_size=args.img_size)
+    # Create datasets (pass canvas_size)
+    train_dataset = DocumentDataset(clean_paths[:train_split], bg_paths, split='train', canvas_size=args.canvas_size)
+    val_dataset = DocumentDataset(clean_paths[train_split:val_split], bg_paths, split='val', canvas_size=args.canvas_size)
     
     train_loader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.num_workers, pin_memory=True)
     val_loader = DataLoader(val_dataset, batch_size=args.batch_size, shuffle=False, num_workers=args.num_workers, pin_memory=True)
@@ -161,7 +162,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on device: {device}")
     
-    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size).to(device)
+    # 2. Setup GPU Pipeline
+    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     model = EnhancementUNet().to(device)
     criterion = EnhancementLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

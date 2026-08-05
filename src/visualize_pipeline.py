@@ -30,7 +30,7 @@ def main():
         return
 
     # 1. Use the dataset to load and compress images (batch_size 3 for 3 visualizations)
-    dataset = DocumentDataset(clean_paths, bg_paths, split='train', target_size=1024)
+    dataset = DocumentDataset(clean_paths, bg_paths, split='train')
     loader = DataLoader(dataset, batch_size=3, shuffle=True)
     
     clean_batch, bg_batch = next(iter(loader))
@@ -38,7 +38,7 @@ def main():
     # 2. Use the GPU Pipeline to degrade them
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     clean_batch, bg_batch = clean_batch.to(device), bg_batch.to(device)
-    pipeline = GPUDegradationPipeline(target_size=1024).to(device)
+    pipeline = GPUDegradationPipeline(target_size=768).to(device)
     
     print("Running GPU degradation pipeline...")
     with torch.no_grad():

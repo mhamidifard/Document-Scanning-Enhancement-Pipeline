@@ -60,7 +60,8 @@ def save_comparison_plot(degraded, enhanced, clean, output_path):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--batch_size', type=int, default=1) # Use 1 for evaluation plots
-    parser.add_argument('--img_size', type=int, default=1024)
+    parser.add_argument('--img_size', type=int, default=768)
+    parser.add_argument('--canvas_size', type=int, default=1536)
     args = parser.parse_args()
 
     # Directories
@@ -88,66 +89,58 @@ def main():
     train_split = int(0.8 * len(clean_paths))
     val_split = int(0.9 * len(clean_paths))
     
-    # Extract the final 10% for pure testing
-    test_scans = clean_paths[val_split:]
-    print(f"Found {len(test_scans)} images in the test set.")
+    splits = {
+        'Training': clean_paths[:train_split],
+        'Validation': clean_paths[train_split:val_split],
+        'Test': clean_paths[val_split:]
+    }
     
-    if len(test_scans) == 0:
-        print("Test set is empty! You need more images in data/clean_scans/.")
-        return
-        
-    test_dataset = DocumentDataset(test_scans, bg_paths, split='test', target_size=args.img_size)
-    test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
-
     # 2. Setup Model, Pipeline, and Metrics
     model = EnhancementUNet().to(device)
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
     model.eval()
     
-    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size).to(device)
+    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     ssim_metric = SSIM(size_average=True).to(device)
     
-    total_psnr = 0.0
-    total_ssim = 0.0
-    num_batches = len(test_loader)
-    
-    print("Starting Evaluation...")
-    
-    with torch.no_grad():
-        for i, (clean_batch, bg_batch) in enumerate(test_loader):
-            clean_batch, bg_batch = clean_batch.to(device), bg_batch.to(device)
-            
-            # Generate the degraded inputs using the deterministic test split
-            inputs, targets = gpu_pipeline(clean_batch, bg_batch, task='enhancement')
-            
-            # Model Inference
-            outputs = model(inputs)
-            
-            # Compute Metrics
-            batch_psnr = calculate_psnr(outputs, targets)
-            batch_ssim = ssim_metric(outputs, targets).item()
-            
-            total_psnr += batch_psnr
-            total_ssim += batch_ssim
-            
-            # Save visual plots for the first 5 images
-            if i < 5:
-                out_file = os.path.join(eval_dir, f"test_result_{i+1}.png")
-                # Take the first image in the batch for plotting
-                save_comparison_plot(inputs[0:1], outputs[0:1], targets[0:1], out_file)
-                print(f"Saved visual comparison: {out_file}")
-
-    # Calculate and Print Final Metrics
-    avg_psnr = total_psnr / num_batches
-    avg_ssim = total_ssim / num_batches
-    
-    print("\n" + "="*40)
+    print("\n" + "="*50)
     print("        EVALUATION RESULTS")
-    print("="*40)
-    print(f"Average PSNR: {avg_psnr:.2f} dB")
-    print(f"Average SSIM: {avg_ssim:.4f}")
-    print(f"Saved {min(5, num_batches)} comparison plots to: {eval_dir}")
-    print("="*40)
+    print("="*50)
+    print(f"{'Split':<15} | {'PSNR':<10} | {'SSIM':<10}")
+    print("-" * 50)
+    
+    for split_name, scans in splits.items():
+        if len(scans) == 0:
+            print(f"{split_name:<15} | {'N/A':<10} | {'N/A':<10}")
+            continue
+            
+        dataset = DocumentDataset(scans, bg_paths, split='test', canvas_size=args.canvas_size)
+        loader = DataLoader(dataset, batch_size=args.batch_size, shuffle=False)
+        
+        total_psnr = 0.0
+        total_ssim = 0.0
+        num_batches = len(loader)
+        
+        with torch.no_grad():
+            for i, (clean_batch, bg_batch) in enumerate(loader):
+                clean_batch, bg_batch = clean_batch.to(device), bg_batch.to(device)
+                inputs, targets = gpu_pipeline(clean_batch, bg_batch, task='enhancement')
+                outputs = model(inputs)
+                
+                total_psnr += calculate_psnr(outputs, targets)
+                total_ssim += ssim_metric(outputs, targets).item()
+                
+                # Only save plots for the Test split
+                if split_name == 'Test' and i < 5:
+                    out_file = os.path.join(eval_dir, f"test_result_{i+1}.png")
+                    save_comparison_plot(inputs[0:1], outputs[0:1], targets[0:1], out_file)
+
+        avg_psnr = total_psnr / num_batches
+        avg_ssim = total_ssim / num_batches
+        print(f"{split_name:<15} | {avg_psnr:<10.2f} | {avg_ssim:<10.4f}")
+        
+    print("="*50)
+    print(f"Saved 5 Test comparison plots to: {eval_dir}")
 
 if __name__ == "__main__":
     main()

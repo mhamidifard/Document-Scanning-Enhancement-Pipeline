@@ -16,11 +16,11 @@ def apply_jpeg_compression(img, quality_range=(30, 90), rng=None):
     return decimg
 
 class DocumentDataset(Dataset):
-    def __init__(self, clean_scans: List[str], backgrounds: List[str], split: str = 'train', target_size: int = 1024):
+    def __init__(self, clean_scans: List[str], backgrounds: List[str], split: str = 'train', canvas_size: int = 1536):
         self.clean_scans = clean_scans
         self.backgrounds = backgrounds
         self.split = split
-        self.target_size = target_size
+        self.canvas_size = canvas_size
         
         if len(self.clean_scans) == 0 or len(self.backgrounds) == 0:
             raise ValueError("Scan and background lists cannot be empty.")
@@ -45,9 +45,9 @@ class DocumentDataset(Dataset):
         bg_img = cv2.imread(bg_path)
         bg_img = cv2.cvtColor(bg_img, cv2.COLOR_BGR2RGB)
         
-        # Resize on CPU first to save GPU memory and bandwidth
-        clean_img = cv2.resize(clean_img, (self.target_size, self.target_size))
-        bg_img = cv2.resize(bg_img, (self.target_size, self.target_size))
+        # Resize to large canvas_size on CPU first to save GPU memory and bandwidth
+        clean_img = cv2.resize(clean_img, (self.canvas_size, self.canvas_size))
+        bg_img = cv2.resize(bg_img, (self.canvas_size, self.canvas_size))
 
         # Apply JPEG compression on CPU
         # We apply it to clean_img here (which simulates compressing the final document)
