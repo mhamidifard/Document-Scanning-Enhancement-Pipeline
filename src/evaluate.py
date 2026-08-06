@@ -62,10 +62,11 @@ def main():
     parser.add_argument('--batch_size', type=int, default=1) # Use 1 for evaluation plots
     parser.add_argument('--img_size', type=int, default=768)
     parser.add_argument('--canvas_size', type=int, default=1536)
+    parser.add_argument('--model_dir', type=str, default="checkpoints")
     args = parser.parse_args()
 
     # Directories
-    ckpt_path = os.path.join(base_dir, "checkpoints", "best_enhancement.pth")
+    ckpt_path = os.path.join(base_dir, args.model_dir, "best_enhancement.pth")
     eval_dir = os.path.join(base_dir, "results", "evaluation")
     os.makedirs(eval_dir, exist_ok=True)
     
