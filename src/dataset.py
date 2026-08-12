@@ -27,7 +27,7 @@ class DocumentDataset(Dataset):
 
     def __len__(self):
         # Arbitrary epoch size; typically multiple of clean scans
-        return len(self.clean_scans) * 10 
+        return len(self.clean_scans) * 50 
 
     def __getitem__(self, idx):
         if self.split in ['val', 'test']:

@@ -13,29 +13,63 @@ base_dir = os.path.dirname(script_dir)
 if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
+import kornia
 from src.dataset import DocumentDataset
 from src.model import CornerRegressionNet, CornerHeatmapNet
-from src.pipeline import GPUDegradationPipeline
+from src.pipeline import CornerDegradationPipeline
 
-def extract_heatmap_coordinates(heatmaps):
+def extract_heatmap_coordinates(heatmaps, window_size=11):
     """
-    Extracts (x, y) coordinates from heatmaps using argmax.
+    Extracts (x, y) coordinates from heatmaps using Gaussian smoothing 
+    followed by localized Center of Mass calculation.
     heatmaps: (B, 4, H, W)
     Returns: (B, 4, 2) tensor of normalized coordinates in [0, 1]
     """
     B, C, H, W = heatmaps.shape
-    # Flatten spatial dimensions
-    heatmaps_flat = heatmaps.view(B, C, -1)
+    device = heatmaps.device
     
-    # Get index of maximum value
+    # 1. Apply Gaussian Smoothing to suppress sharp noise (text spikes)
+    # kernel size 11, sigma 3.0
+    blur = kornia.filters.GaussianBlur2d((11, 11), (3.0, 3.0))
+    heatmaps_smoothed = blur(heatmaps)
+    
+    # 2. Find global max index to locate the peak
+    heatmaps_flat = heatmaps_smoothed.view(B, C, -1)
     max_idx = torch.argmax(heatmaps_flat, dim=2)
     
-    # Convert flat index back to 2D coordinates
-    y = (max_idx // W).float()
-    x = (max_idx % W).float()
+    y_max = (max_idx // W)
+    x_max = (max_idx % W)
     
-    # Normalize back to [0, 1]
-    coords = torch.stack([x / (W - 1), y / (H - 1)], dim=2)
+    # 3. Localized Center of Mass around the peak for sub-pixel accuracy
+    coords = torch.zeros((B, C, 2), device=device)
+    
+    half_w = window_size // 2
+    
+    for b in range(B):
+        for c in range(C):
+            cy, cx = y_max[b, c].item(), x_max[b, c].item()
+            
+            # Define window boundaries, clipping to image edges
+            y_min = max(0, cy - half_w)
+            y_max_win = min(H, cy + half_w + 1)
+            x_min = max(0, cx - half_w)
+            x_max_win = min(W, cx + half_w + 1)
+            
+            window = heatmaps_smoothed[b, c, y_min:y_max_win, x_min:x_max_win]
+            
+            # Calculate Center of Mass
+            y_grid = torch.arange(y_min, y_max_win, device=device).float()
+            x_grid = torch.arange(x_min, x_max_win, device=device).float()
+            
+            sum_weights = torch.sum(window) + 1e-8
+            
+            y_cm = torch.sum(window.sum(dim=1) * y_grid) / sum_weights
+            x_cm = torch.sum(window.sum(dim=0) * x_grid) / sum_weights
+            
+            # Normalize back to [0, 1]
+            coords[b, c, 0] = x_cm / (W - 1)
+            coords[b, c, 1] = y_cm / (H - 1)
+            
     return coords
 
 def main():
@@ -69,7 +103,7 @@ def main():
     test_loader = DataLoader(test_dataset, batch_size=args.batch_size, shuffle=False)
     
     # 2. Setup GPU Pipeline
-    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
+    gpu_pipeline = CornerDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     
     # 3. Load Models
     models_to_test = {}

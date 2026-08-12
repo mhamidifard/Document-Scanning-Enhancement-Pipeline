@@ -16,7 +16,19 @@ if base_dir not in sys.path:
 
 from src.dataset import DocumentDataset
 from src.model import CornerRegressionNet, CornerHeatmapNet
-from src.pipeline import GPUDegradationPipeline
+from src.pipeline import CornerDegradationPipeline
+import torch.nn.functional as F
+
+class WeightedMSELoss(nn.Module):
+    def __init__(self, weight=20.0):
+        super().__init__()
+        self.weight = weight
+
+    def forward(self, pred, target):
+        mse = F.mse_loss(pred, target, reduction='none')
+        # heavily penalize missing the peaks
+        w_mask = torch.where(target > 0.05, self.weight, 1.0)
+        return (mse * w_mask).mean()
 
 def main():
     parser = argparse.ArgumentParser()
@@ -56,14 +68,14 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     print(f"Training on device: {device}")
     
-    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
+    gpu_pipeline = CornerDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     
     if args.approach == 'regression':
         model = CornerRegressionNet(in_channels=3, use_dropout=args.use_dropout).to(device)
         criterion = nn.L1Loss()
     else:
         model = CornerHeatmapNet(in_channels=3, out_channels=4, use_dropout=args.use_dropout).to(device)
-        criterion = nn.MSELoss()
+        criterion = WeightedMSELoss(weight=20.0)
         
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     

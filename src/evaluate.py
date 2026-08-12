@@ -17,7 +17,7 @@ if base_dir not in sys.path:
 
 from src.dataset import DocumentDataset
 from src.model import EnhancementUNet
-from src.pipeline import GPUDegradationPipeline
+from src.pipeline import EnhancementDegradationPipeline
 from src.train import SSIM # Reuse SSIM metric from train.py
 
 def calculate_psnr(pred, target):
@@ -101,7 +101,7 @@ def main():
     model.load_state_dict(torch.load(ckpt_path, map_location=device, weights_only=True))
     model.eval()
     
-    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
+    gpu_pipeline = EnhancementDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     ssim_metric = SSIM(size_average=True).to(device)
     
     print("\n" + "="*50)

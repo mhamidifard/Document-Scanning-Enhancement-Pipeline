@@ -18,7 +18,7 @@ if base_dir not in sys.path:
 
 from src.dataset import DocumentDataset
 from src.model import EnhancementUNet
-from src.pipeline import GPUDegradationPipeline
+from src.pipeline import EnhancementDegradationPipeline
 
 # ==========================================
 # 1. Custom Loss Functions
@@ -164,7 +164,7 @@ def main():
     print(f"Training on device: {device}")
     
     # 2. Setup GPU Pipeline
-    gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
+    gpu_pipeline = EnhancementDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     model = EnhancementUNet(use_dropout=args.use_dropout).to(device)
     criterion = EnhancementLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

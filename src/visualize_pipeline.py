@@ -16,7 +16,7 @@ if base_dir not in sys.path:
     sys.path.insert(0, base_dir)
 
 from src.dataset import DocumentDataset
-from src.pipeline import GPUDegradationPipeline
+from src.pipeline import CornerDegradationPipeline
 
 def main():
     artifact_dir = os.path.join(base_dir, "results", "visualize-degradation")
@@ -38,7 +38,7 @@ def main():
     # 2. Use the GPU Pipeline to degrade them
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     clean_batch, bg_batch = clean_batch.to(device), bg_batch.to(device)
-    pipeline = GPUDegradationPipeline(target_size=768).to(device)
+    pipeline = CornerDegradationPipeline(target_size=768).to(device)
     
     print("Running GPU degradation pipeline...")
     with torch.no_grad():
