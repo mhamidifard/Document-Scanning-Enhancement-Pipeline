@@ -19,8 +19,11 @@ class DoubleConv(nn.Module):
 
 
 class UNet(nn.Module):
-    def __init__(self, in_channels=3, out_channels=3, use_sigmoid=True):
+    def __init__(self, in_channels=3, out_channels=3, use_sigmoid=True, use_dropout=False):
         super().__init__()
+        self.use_dropout = use_dropout
+        if self.use_dropout:
+            self.dropout = nn.Dropout2d(p=0.2)
         
         # Encoder (Downsampling)
         self.inc = DoubleConv(in_channels, 64)
@@ -67,6 +70,8 @@ class UNet(nn.Module):
         
         # Bottleneck
         x5 = self.down4(x4)
+        if self.use_dropout:
+            x5 = self.dropout(x5)
         
         # Decoder with Skip Connections
         # Block 1
@@ -74,12 +79,16 @@ class UNet(nn.Module):
         x = self.up_conv1(x)
         x = torch.cat([x4, x], dim=1) # Concatenate along channel dimension
         x = self.conv_up1(x)
+        if self.use_dropout:
+            x = self.dropout(x)
         
         # Block 2
         x = self.up2(x)
         x = self.up_conv2(x)
         x = torch.cat([x3, x], dim=1)
         x = self.conv_up2(x)
+        if self.use_dropout:
+            x = self.dropout(x)
         
         # Block 3
         x = self.up3(x)
@@ -101,13 +110,13 @@ class UNet(nn.Module):
 EnhancementUNet = UNet
 
 class CornerHeatmapNet(UNet):
-    def __init__(self, in_channels=3, out_channels=4):
+    def __init__(self, in_channels=3, out_channels=4, use_dropout=False):
         # Heatmaps suffer from vanishing gradients with MSE if a Sigmoid is used.
         # We output raw logits and supervise directly with the Gaussian heatmaps.
-        super().__init__(in_channels=in_channels, out_channels=out_channels, use_sigmoid=False)
+        super().__init__(in_channels=in_channels, out_channels=out_channels, use_sigmoid=False, use_dropout=use_dropout)
 
 class CornerRegressionNet(nn.Module):
-    def __init__(self, in_channels=3):
+    def __init__(self, in_channels=3, use_dropout=False):
         super().__init__()
         
         # Encoder (Downsampling to 1/32 of 256x256 = 8x8)
@@ -126,15 +135,28 @@ class CornerRegressionNet(nn.Module):
         
         # Fully Connected Layers
         # Assuming input size of 256x256, the final feature map is 8x8
-        self.fc = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(512 * 8 * 8, 1024),
-            nn.ReLU(inplace=True),
-            nn.Linear(1024, 256),
-            nn.ReLU(inplace=True),
-            nn.Linear(256, 8),
-            nn.Sigmoid() # Coordinates are normalized [0, 1]
-        )
+        if use_dropout:
+            self.fc = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(512 * 8 * 8, 1024),
+                nn.ReLU(inplace=True),
+                nn.Dropout(p=0.5),
+                nn.Linear(1024, 256),
+                nn.ReLU(inplace=True),
+                nn.Dropout(p=0.5),
+                nn.Linear(256, 8),
+                nn.Sigmoid() # Coordinates are normalized [0, 1]
+            )
+        else:
+            self.fc = nn.Sequential(
+                nn.Flatten(),
+                nn.Linear(512 * 8 * 8, 1024),
+                nn.ReLU(inplace=True),
+                nn.Linear(1024, 256),
+                nn.ReLU(inplace=True),
+                nn.Linear(256, 8),
+                nn.Sigmoid() # Coordinates are normalized [0, 1]
+            )
 
     def forward(self, x):
         x = self.encoder(x)

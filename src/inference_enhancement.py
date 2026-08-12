@@ -14,12 +14,24 @@ if base_dir not in sys.path:
 
 from src.model import EnhancementUNet
 
+def apply_unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.5, threshold=0):
+    """Return a sharpened version of the image, using an unsharp mask."""
+    # image must be uint8
+    blurred = cv2.GaussianBlur(image, kernel_size, sigma)
+    sharpened = float(amount + 1) * image - float(amount) * blurred
+    sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+    if threshold > 0:
+        low_contrast_mask = np.absolute(image.astype(float) - blurred.astype(float)) < threshold
+        np.copyto(sharpened, image, where=low_contrast_mask)
+    return sharpened
+
 def main():
     parser = argparse.ArgumentParser(description="Inference pipeline for Document Enhancement")
     parser.add_argument('--input', type=str, required=True, help="Path to input rectified image")
     parser.add_argument('--output', type=str, default="enhanced_output.jpg", help="Path to save enhanced image")
     parser.add_argument('--model_dir', type=str, default="checkpoints")
     parser.add_argument('--img_size', type=int, default=768, help="Size to resize for model inference")
+    parser.add_argument('--sharpen', action='store_true', help="Apply unsharp mask to intensify text and contrast")
     args = parser.parse_args()
 
     ckpt_path = os.path.join(base_dir, args.model_dir, "best_enhancement.pth")
@@ -72,6 +84,11 @@ def main():
     
     # Resize the enhanced image back to the original dimensions
     enhanced_img_orig_size = cv2.resize(enhanced_img, (orig_w, orig_h))
+    
+    # Optional Post-processing: Sharpening (Unsharp Mask)
+    if args.sharpen:
+        print("Applying Unsharp Masking to intensify text...")
+        enhanced_img_orig_size = apply_unsharp_mask(enhanced_img_orig_size)
     
     # Save the output image (Convert RGB back to BGR for OpenCV)
     enhanced_bgr = cv2.cvtColor(enhanced_img_orig_size, cv2.COLOR_RGB2BGR)

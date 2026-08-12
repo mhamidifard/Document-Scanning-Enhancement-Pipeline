@@ -19,6 +19,17 @@ from src.model import CornerRegressionNet, CornerHeatmapNet, EnhancementUNet
 from src.evaluate_corner import extract_heatmap_coordinates
 from src.evaluate_real import order_points
 
+def apply_unsharp_mask(image, kernel_size=(5, 5), sigma=1.0, amount=1.5, threshold=0):
+    """Return a sharpened version of the image, using an unsharp mask."""
+    # image must be uint8
+    blurred = cv2.GaussianBlur(image, kernel_size, sigma)
+    sharpened = float(amount + 1) * image - float(amount) * blurred
+    sharpened = np.clip(sharpened, 0, 255).astype(np.uint8)
+    if threshold > 0:
+        low_contrast_mask = np.absolute(image.astype(float) - blurred.astype(float)) < threshold
+        np.copyto(sharpened, image, where=low_contrast_mask)
+    return sharpened
+
 def run_ocr_and_get_confidence(img_rgb):
     """
     Runs Tesseract OCR on an RGB image and returns the average confidence score
@@ -73,6 +84,7 @@ def main():
     parser.add_argument('--enhancement_size', type=int, default=768, help="Size of the enhanced document")
     parser.add_argument('--corner_model_dir', type=str, default="checkpoints", help="Directory containing the corner model")
     parser.add_argument('--enh_model_dir', type=str, default="checkpoints", help="Directory containing the enhancement model")
+    parser.add_argument('--sharpen', action='store_true', help="Apply unsharp mask to intensify text")
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -177,7 +189,10 @@ def main():
             def enhance_crop(crop_rgb):
                 tensor = torch.from_numpy(crop_rgb).permute(2, 0, 1).float().unsqueeze(0).to(device) / 255.0
                 out_tensor = enh_net(tensor)
-                return tensor_to_rgb(out_tensor)
+                out_rgb = tensor_to_rgb(out_tensor)
+                if args.sharpen:
+                    out_rgb = apply_unsharp_mask(out_rgb)
+                return out_rgb
                 
             enh_crop_true = enhance_crop(raw_crop_true)
             enh_crop_pred = enhance_crop(raw_crop_pred)

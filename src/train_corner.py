@@ -26,6 +26,7 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--img_size', type=int, default=256)
     parser.add_argument('--canvas_size', type=int, default=1536)
+    parser.add_argument('--use_dropout', action='store_true', help='Enable Dropout layers')
     args = parser.parse_args()
 
     # Create directories
@@ -58,10 +59,10 @@ def main():
     gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
     
     if args.approach == 'regression':
-        model = CornerRegressionNet(in_channels=3).to(device)
+        model = CornerRegressionNet(in_channels=3, use_dropout=args.use_dropout).to(device)
         criterion = nn.L1Loss()
     else:
-        model = CornerHeatmapNet(in_channels=3, out_channels=4).to(device)
+        model = CornerHeatmapNet(in_channels=3, out_channels=4, use_dropout=args.use_dropout).to(device)
         criterion = nn.MSELoss()
         
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)

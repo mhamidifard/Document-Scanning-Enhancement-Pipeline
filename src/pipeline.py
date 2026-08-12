@@ -27,9 +27,9 @@ class GPUDegradationPipeline(nn.Module):
             [0, canvas_size - 1]
         ], dtype=torch.float32)
         
-        # Kornia GPU Augmentations - Toned down
-        self.color_jitter = kornia.augmentation.ColorJitter(0.15, 0.15, 0.15, 0.05, p=0.8)
-        self.blur = kornia.augmentation.RandomGaussianBlur((3, 3), (0.1, 1.0), p=0.3)
+        # Kornia GPU Augmentations - Increased intensity for synthetic-to-real gap
+        self.color_jitter = kornia.augmentation.ColorJitter(0.3, 0.3, 0.3, 0.1, p=0.9)
+        self.blur = kornia.augmentation.RandomGaussianBlur((5, 5), (0.1, 1.5), p=0.5)
 
     def generate_random_corners(self, batch_size, device):
         """Generates perturbed corners for the entire batch in parallel."""
@@ -66,47 +66,55 @@ class GPUDegradationPipeline(nn.Module):
         
         degraded = warped_clean * mask + bg_batch * (1 - mask)
         
-        # 4. Shadow Generation (Vectorized & Diverse)
+        # 4. Shadow Generation (Vectorized, Diverse & Overlapping)
         shadows = torch.ones_like(degraded)
-        rand_val = torch.rand(1).item()
         
-        if rand_val < 0.33:
-            # 1. Harsh horizontal/diagonal cutoff (like a desk edge or paper curl)
-            intensity = torch.empty(B, 1, 1, 1, device=device).uniform_(0.2, 0.7)
-            start_idx = torch.randint(0, W // 2, (B,), device=device)
-            for b in range(B):
-                shadows[b, :, :, start_idx[b]:] *= intensity[b].item()
-                
-        elif rand_val < 0.66:
-            # 2. Soft linear gradient (general uneven lighting)
-            gradient = torch.linspace(1.0, torch.empty(1).uniform_(0.3, 0.7).item(), W, device=device)
-            gradient = gradient.unsqueeze(0).unsqueeze(0).expand(B, 3, H, W)
-            shadows *= gradient
+        # Apply 1 to 3 overlapping shadows to simulate complex real-world lighting
+        num_shadows = torch.randint(1, 4, (1,)).item()
+        
+        for _ in range(num_shadows):
+            rand_val = torch.rand(1).item()
             
-        else:
-            # 3. Radial/Blob shadow (simulating a hand or phone casting a shadow)
-            # Create a 2D meshgrid
-            y = torch.linspace(-1, 1, H, device=device)
-            x = torch.linspace(-1, 1, W, device=device)
-            yy, xx = torch.meshgrid(y, x, indexing='ij')
-            
-            for b in range(B):
-                # Random center for the shadow blob
-                cx = torch.empty(1, device=device).uniform_(-0.8, 0.8).item()
-                cy = torch.empty(1, device=device).uniform_(-0.8, 0.8).item()
+            if rand_val < 0.33:
+                # 1. Harsh horizontal/diagonal cutoff (like a desk edge or paper curl)
+                # Allow much darker shadows (down to 0.1)
+                intensity = torch.empty(B, 1, 1, 1, device=device).uniform_(0.1, 0.6)
+                start_idx = torch.randint(0, W // 2, (B,), device=device)
                 
-                # Distance from center
-                dist = torch.sqrt((xx - cx)**2 + (yy - cy)**2)
+                # Randomly decide if shadow is on the left or right
+                for b in range(B):
+                    if torch.rand(1).item() > 0.5:
+                        shadows[b, :, :, start_idx[b]:] *= intensity[b].item()
+                    else:
+                        shadows[b, :, :, :start_idx[b]] *= intensity[b].item()
+                    
+            elif rand_val < 0.66:
+                # 2. Soft linear gradient (general uneven lighting)
+                # Allow gradient to go very dark (0.1 to 0.5)
+                gradient = torch.linspace(1.0, torch.empty(1).uniform_(0.1, 0.5).item(), W, device=device)
+                if torch.rand(1).item() > 0.5:
+                    gradient = torch.flip(gradient, dims=[0])
+                gradient = gradient.unsqueeze(0).unsqueeze(0).expand(B, 3, H, W)
+                shadows *= gradient
                 
-                # Random radius and intensity
-                radius = torch.empty(1, device=device).uniform_(0.5, 1.5).item()
-                intensity = torch.empty(1, device=device).uniform_(0.2, 0.6).item()
+            else:
+                # 3. Radial/Blob shadow (simulating a hand or phone casting a shadow)
+                y = torch.linspace(-1, 1, H, device=device)
+                x = torch.linspace(-1, 1, W, device=device)
+                yy, xx = torch.meshgrid(y, x, indexing='ij')
                 
-                # Create soft circular mask
-                blob = torch.clamp((dist / radius), 0, 1)
-                # Map distance: 0 (center) -> intensity, 1 (edge) -> 1.0
-                blob = intensity + (1.0 - intensity) * blob
-                shadows[b] *= blob.unsqueeze(0)
+                for b in range(B):
+                    cx = torch.empty(1, device=device).uniform_(-0.8, 0.8).item()
+                    cy = torch.empty(1, device=device).uniform_(-0.8, 0.8).item()
+                    dist = torch.sqrt((xx - cx)**2 + (yy - cy)**2)
+                    
+                    radius = torch.empty(1, device=device).uniform_(0.5, 1.5).item()
+                    # Darker blob shadows
+                    intensity = torch.empty(1, device=device).uniform_(0.1, 0.5).item()
+                    
+                    blob = torch.clamp((dist / radius), 0, 1)
+                    blob = intensity + (1.0 - intensity) * blob
+                    shadows[b] *= blob.unsqueeze(0)
         
         degraded = degraded * shadows
         

@@ -126,6 +126,7 @@ def main():
     parser.add_argument('--num_workers', type=int, default=0)
     parser.add_argument('--img_size', type=int, default=768)
     parser.add_argument('--canvas_size', type=int, default=1536)
+    parser.add_argument('--use_dropout', action='store_true', help='Enable Dropout layers')
     args = parser.parse_args()
 
     # Create directories
@@ -164,7 +165,7 @@ def main():
     
     # 2. Setup GPU Pipeline
     gpu_pipeline = GPUDegradationPipeline(target_size=args.img_size, canvas_size=args.canvas_size).to(device)
-    model = EnhancementUNet().to(device)
+    model = EnhancementUNet(use_dropout=args.use_dropout).to(device)
     criterion = EnhancementLoss().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
     

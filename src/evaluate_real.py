@@ -41,6 +41,7 @@ def main():
     parser.add_argument('--dataset_dir', type=str, required=True, help="Path to Roboflow COCO export folder (e.g. data/real_test/test)")
     parser.add_argument('--img_size', type=int, default=256)
     parser.add_argument('--threshold', type=float, default=0.05, help="Normalized distance threshold for success")
+    parser.add_argument('--model_dir', type=str, default="checkpoints")
     args = parser.parse_args()
 
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
@@ -74,7 +75,7 @@ def main():
     print(f"Loaded {len(annotations)} labeled images from real dataset.")
 
     # 2. Load Models
-    ckpt_dir = os.path.join(base_dir, "checkpoints")
+    ckpt_dir = os.path.join(base_dir,args.model_dir )
     reg_path = os.path.join(ckpt_dir, "best_corner_regression.pth")
     heat_path = os.path.join(ckpt_dir, "best_corner_heatmap.pth")
     

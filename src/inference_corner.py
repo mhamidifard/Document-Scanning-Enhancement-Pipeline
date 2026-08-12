@@ -21,9 +21,11 @@ def main():
     parser.add_argument('--output', type=str, default="corner_output.jpg", help="Path to save annotated image")
     parser.add_argument('--approach', type=str, required=True, choices=['regression', 'heatmap'], help="Model to use")
     parser.add_argument('--img_size', type=int, default=256, help="Size to resize for model inference")
+    parser.add_argument('--model_dir', type=str, default="checkpoints")
+
     args = parser.parse_args()
 
-    ckpt_path = os.path.join(base_dir, "checkpoints", f"best_corner_{args.approach}.pth")
+    ckpt_path = os.path.join(base_dir, args.model_dir, f"best_corner_{args.approach}.pth")
     if not os.path.exists(ckpt_path):
         print(f"Error: Model weights not found at {ckpt_path}.")
         return
